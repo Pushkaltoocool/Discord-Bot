@@ -8,6 +8,25 @@ import asyncio
 import datetime
 import re
 
+# Added Flask keep-alive server for Render
+from flask import Flask
+import threading
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "✅ Tryhard Bot is alive!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = threading.Thread(target=run_web)
+    t.start()
+
+# -------------------------------------------------------------
+
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
 
@@ -19,7 +38,7 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 bot.remove_command("help") 
 
-#Kalvin
+# 👤 Kalvin
 TARGET_USER_ID = 620792701201154048  
 
 # fallback list of quotes
@@ -123,7 +142,7 @@ async def poll(ctx, *args):
     for i in range(len(options)):
         await msg.add_reaction(reactions[i])
 
-#Daily motivational quote at 8 AM
+# Daily motivational quote at 8 AM
 @tasks.loop(hours=24)
 async def send_daily_quote():
     now = datetime.datetime.now()
@@ -161,4 +180,5 @@ async def help_command(ctx):
 
     await ctx.send(embed=embed)
 
+keep_alive()
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
