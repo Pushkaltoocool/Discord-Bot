@@ -50,16 +50,37 @@ quotes = [
     "Success is not final, failure is not fatal: It is the courage to continue that counts.",
 ]
 
-# sad triggers (words, slang, emojis)
+# Expanded depression/sadness triggers
 sad_words = [
-    "sad", "depressed", "unhappy", "miserable", "hopeless", "down", "lonely", "crying", 
-    "cry", "cryinggg", "tears", "tearful", "sorrow", "broken", "heartbroken", "hurt",
-    "empty", "lost", "worthless", "pointless", "tired of life", "hate my life", "hml",
-    "pain", "painful", "suffering", "low", "drained", "stressed", "anxious", "anxiety",
-    "im sad", "so sad", "really sad", "depressing", "down bad", "blue", "emo", "bruh im sad",
-    "unloved", "nobody cares", "kill myself", "kms", "kys", "sadtimes", "sadge", "feelsbad",
-    "fml", "feels bad man", "ugh", "ugh life",
-    "😭", "😢", "☹️", "😞", "😔", "😟", "😩", "😫", "🥺", "😿", "💔", "🫠", "😕"
+    # basic sad
+    "sad", "so sad", "really sad", "feeling sad", "feels sad", "sadness", "sadtimes", "sadge",
+    "depressed", "depression", "depressing", "depress", "down bad", "downbad", "emo", "blue",
+    "cry", "crying", "cryinggg", "cryin", "tears", "tearful", "sobbing", "weeping", "😢", "😭",
+    
+    # hopelessness
+    "hopeless", "pointless", "worthless", "meaningless", "nothing matters", "no point",
+    "why bother", "life sucks", "fml", "ugh life", "why me", "done with life", "so tired of this",
+    
+    # loneliness / rejection
+    "lonely", "alone", "unloved", "nobody cares", "nobody loves me", "i’m worthless", "not cared about",
+    "no friends", "ignored", "abandoned", "empty", "isolated",
+    
+    # suicidal/self-harm
+    "kill myself", "kms", "kys", "end it all", "suicidal", "suicide", "i wanna die", "want to die", 
+    "wish i was dead", "better off dead", "die alone", "ending it", "goodbye world", 
+    "slit wrists", "cutting", "self harm", "self-harm", "hurt myself", "not gonna make it",
+    "im gonna throw myself off a cliff", "throw myself off a cliff", 
+    "jump off a bridge", "jump off a building", "throw myself off", "end my life",
+    
+    # stress/anxiety
+    "anxious", "anxiety", "stressed", "stressful", "overwhelmed", "drained", "burnt out", "burned out",
+    "low energy", "tired", "exhausted", "done", "numb", "broken", "hurt", "pain", "painful", "suffering",
+    "mentally exhausted", "emotionally drained", "can’t handle this", "can’t do this anymore",
+    
+    # subtle/modern phrases
+    "down", "feelsbad", "feels bad man", "bruh im sad", "ugh", "ugh life", "not okay", "im not okay", 
+    "never happy", "so low", "feeling low", "stuck", "trapped", "lost", "dark thoughts", "heavy",
+    "in my feels", "in my feelings", "broken heart", "💔", "🫠", "😔", "☹️", "😞", "😟", "😩", "😫", "🥺", "😿", "😕"
 ]
 
 # 🚫 EXTENSIVE banned list with variations
@@ -189,6 +210,44 @@ async def thankyou(ctx):
 async def plzspeedineedthis(ctx):
     await ctx.send("https://tenor.com/view/my-mom-is-kinda-homeless-ishowspeed-speeding-please-speed-i-need-this-ishowspeed-trying-not-to-laugh-gif-16620227105127147208")
 
+# Coin flip command
+@bot.command(name="flip")
+async def flip(ctx):
+    result = random.choice(["Heads 👑", "Tails 🍑"])
+    await ctx.send(f"🪙 The coin landed on... **{result}**!")
+
+# Roast command (API)
+@bot.command(name="roast")
+async def roast(ctx, member: discord.Member = None):
+    if not member:
+        member = ctx.author
+    
+    url = "https://evilinsult.com/generate_insult.php?lang=en&type=json"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                insult = data.get("insult", "You're lucky, I couldn't think of an insult.")
+                await ctx.send(f"🔥 {member.mention}, {insult}")
+            else:
+                await ctx.send(f"🔥 {member.mention}, you're lucky, the roast machine broke.")
+
+# Compliment command (API)
+@bot.command(name="compliment")
+async def compliment(ctx, member: discord.Member = None):
+    if not member:
+        member = ctx.author
+    
+    url = "https://complimentr.com/api"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                comp = data.get("compliment", "You're amazing!")
+                await ctx.send(f"💖 {member.mention}, {comp}")
+            else:
+                await ctx.send(f"💖 {member.mention}, you're amazing (API failed but I got you).")
+
 # Custom help command (renamed)
 @bot.command(name="helptryhard")
 async def help_command(ctx):
@@ -201,8 +260,11 @@ async def help_command(ctx):
     embed.add_field(name="!ineedhelp", value="Get a motivational quote instantly.", inline=False)
     embed.add_field(name="!thankyou", value="Send a thank you gif.", inline=False)
     embed.add_field(name="!plzspeedineedthis", value="Send a Speed gif.", inline=False)
+    embed.add_field(name="!flip", value="Flip a coin (Heads or Tails).", inline=False)
+    embed.add_field(name="!roast @user", value="Send a random roast from Evil Insult API.", inline=False)
+    embed.add_field(name="!compliment @user", value="Send a wholesome compliment from Complimentr API.", inline=False)
     embed.add_field(name="🌞 Daily Quotes", value="I send a motivational quote every day at 8 AM in #general.", inline=False)
-    embed.add_field(name="😢 Sadness Detector", value="If you say things like 'sad', 'depressed', '😭' etc., I’ll send you a motivational quote.", inline=False)
+    embed.add_field(name="😢 Depression Checker", value="If you say sad/depressed/self-harm things, I’ll send you a motivational quote.", inline=False)
     embed.add_field(name="🛑 Special Filter", value="If user `620792701201154048` uses *any* version of the N-word, their message is deleted and replaced with a funny reply.", inline=False)
     embed.add_field(name="😂 Auto-Triggers", value="Saying 'thank you' or 'plz speed i need this' will trigger funny gifs.", inline=False)
 
