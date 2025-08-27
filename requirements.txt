@@ -1,4 +1,4 @@
 discord.py==2.6.2
-python-dotenv
-aiohttp
-flask
+python-dotenv==1.1.1
+aiohttp==3.12.15
+flask==3.0.3
