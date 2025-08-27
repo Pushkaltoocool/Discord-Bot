@@ -7,6 +7,7 @@ import aiohttp
 import asyncio
 import datetime
 import re
+import random
 
 # Added Flask keep-alive server for Render
 from flask import Flask
@@ -88,6 +89,8 @@ def normalize_message(content: str) -> str:
     text = re.sub(r'[^a-z]', '', text)  # keep only a-z
     return text
 
+# ---------------- BOT EVENTS -----------------
+
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user.name} is online and ready!")
@@ -97,8 +100,10 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    if message.author == bot.user:
+    if message.author == bot.user or message.author.bot:
         return
+
+    lower_msg = message.content.lower()
 
     # just for kalvin HAHAHAHHAAH
     if message.author.id == TARGET_USER_ID:
@@ -111,11 +116,21 @@ async def on_message(message):
                 break
 
     # Sadness detector :(
-    if any(word in message.content.lower() for word in sad_words):
+    if any(word in lower_msg for word in sad_words):
         quote = await get_quote()
         await message.channel.send(f"💙 Stay strong {message.author.mention}, here’s something for you:\n> {quote}")
 
+    # THANK YOU auto-trigger
+    if "thank you" in lower_msg:
+        await message.channel.send("https://tenor.com/view/thank-you-thank-you-bro-how-i-thank-bro-fantasy-challenge-thank-you-tiktok-gif-7839145224229268701")
+
+    # PLZ SPEED auto-trigger (in order)
+    if re.search(r"plz.*speed.*i need this", lower_msg):
+        await message.channel.send("https://tenor.com/view/my-mom-is-kinda-homeless-ishowspeed-speeding-please-speed-i-need-this-ishowspeed-trying-not-to-laugh-gif-16620227105127147208")
+
     await bot.process_commands(message)
+
+# ---------------- BOT COMMANDS -----------------
 
 # Poll command
 @bot.command()
@@ -164,8 +179,18 @@ async def ineedhelp(ctx):
     quote = await get_quote()
     await ctx.send(f"💡 Here’s something to lift you up, {ctx.author.mention}:\n> {quote}")
 
-# Custom help command
-@bot.command(name="help")
+# Thank You command
+@bot.command(name="thankyou")
+async def thankyou(ctx):
+    await ctx.send("https://tenor.com/view/thank-you-thank-you-bro-how-i-thank-bro-fantasy-challenge-thank-you-tiktok-gif-7839145224229268701")
+
+# Speed command
+@bot.command(name="plzspeedineedthis")
+async def plzspeedineedthis(ctx):
+    await ctx.send("https://tenor.com/view/my-mom-is-kinda-homeless-ishowspeed-speeding-please-speed-i-need-this-ishowspeed-trying-not-to-laugh-gif-16620227105127147208")
+
+# Custom help command (renamed)
+@bot.command(name="helptryhard")
 async def help_command(ctx):
     embed = discord.Embed(
         title="📖 Tryhard Bot Help",
@@ -174,11 +199,15 @@ async def help_command(ctx):
     )
     embed.add_field(name="!poll <question> <option1> <option2> ...", value="Create a poll (2–10 options).", inline=False)
     embed.add_field(name="!ineedhelp", value="Get a motivational quote instantly.", inline=False)
+    embed.add_field(name="!thankyou", value="Send a thank you gif.", inline=False)
+    embed.add_field(name="!plzspeedineedthis", value="Send a Speed gif.", inline=False)
     embed.add_field(name="🌞 Daily Quotes", value="I send a motivational quote every day at 8 AM in #general.", inline=False)
     embed.add_field(name="😢 Sadness Detector", value="If you say things like 'sad', 'depressed', '😭' etc., I’ll send you a motivational quote.", inline=False)
     embed.add_field(name="🛑 Special Filter", value="If user `620792701201154048` uses *any* version of the N-word, their message is deleted and replaced with a funny reply.", inline=False)
+    embed.add_field(name="😂 Auto-Triggers", value="Saying 'thank you' or 'plz speed i need this' will trigger funny gifs.", inline=False)
 
     await ctx.send(embed=embed)
 
+# ---------------- RUN -----------------
 keep_alive()
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
