@@ -140,9 +140,7 @@ async def moodplay(ctx):
     print("Collected messages:", messages)  # DEBUG
 
     try:
-        # Run Gemini in a separate thread (so async loop doesn't freeze)
-        response = await asyncio.to_thread(
-            model.generate_content,
+        response = model.generate_content(
             f"Using these messages in the conversation, return the mood and a song recommendation in JSON. Messages: {messages}",
             generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json",
