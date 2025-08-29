@@ -228,7 +228,7 @@ async def moodplay(ctx):
         await ctx.send("⚡ Moodplay command triggered!")
         await ctx.send("🔍 Collecting recent messages...")
 
-        # Collect a compact preview for LLM context (not sent to channel)
+        # Collect chat fragment
         lines = []
         async for msg in ctx.channel.history(limit=30):
             if msg.author.bot:
@@ -237,13 +237,11 @@ async def moodplay(ctx):
             content = msg.content.replace("\n", " ").strip()
             if not content:
                 continue
-            # keep lines short to avoid oversizing the prompt
             content = content[:160]
             lines.append(f"{author}: {content}")
         lines.reverse()
         preview = "\n".join(lines[-10:])
 
-        # Prompt: force strict JSON with one specific song (title + artist only)
         prompt = (
             "You are a DJ. Read the chat fragment and output STRICT JSON matching this schema:\n"
             "{ \"mood\": string, \"song_title\": string, \"artist\": string }\n"
@@ -258,29 +256,29 @@ async def moodplay(ctx):
             await ctx.send("🤖 Talking to Gemini...")
             model = genai.GenerativeModel("gemini-2.0-flash")
 
-            # First try: structured output via Pydantic schema
-            try:
-                response = await asyncio.to_thread(
-                    model.generate_content,
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        response_mime_type="application/json",
-                        response_schema=MoodResponse,
-                    ),
-                )
-                raw = response.text or ""
-            except Exception:
-                # Fallback: ask for plain JSON (no schema)
-                response = await asyncio.to_thread(
-                    model.generate_content,
-                    prompt,
-                    generation_config=genai.types.GenerationConfig(
-                        response_mime_type="application/json",
-                    ),
-                )
-                raw = (getattr(response, "text", None) or "").strip()
+            response = await asyncio.to_thread(
+                model.generate_content,
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    response_mime_type="application/json",
+                ),
+            )
 
-            # Parse JSON robustly
+            # Try multiple places for raw text
+            raw = getattr(response, "text", None) or ""
+            if not raw and hasattr(response, "candidates"):
+                try:
+                    raw = response.candidates[0].content.parts[0].text
+                except Exception:
+                    pass
+
+            # DEBUG: log raw Gemini output in Discord
+            if raw:
+                await send_as_file(ctx, raw, "gemini_raw.json", header="📝 Raw Gemini output:")
+            else:
+                await ctx.send("⚠️ Gemini returned no text.")
+
+            # Parse JSON
             data = None
             if raw:
                 try:
@@ -290,9 +288,7 @@ async def moodplay(ctx):
                     if m:
                         data = json.loads(m.group(0))
 
-            # Final safety fallback (static recs) if model fails
             if not data or not isinstance(data, dict):
-                # very small mood-based fallback set
                 fallback = [
                     {"mood": "uplifting", "song_title": "Don't Stop Me Now", "artist": "Queen"},
                     {"mood": "chill", "song_title": "Lo-Fi Beats", "artist": "ChilledCow"},
@@ -305,21 +301,17 @@ async def moodplay(ctx):
             song_title = str(data.get("song_title", "")).strip()
             artist = str(data.get("artist", "")).strip()
 
-            # sanitize; ensure we always have a single concrete song+artist
             if not song_title or not artist:
                 song_title, artist = "Don't Stop Me Now", "Queen"
 
-            # Post a tidy summary
             await ctx.send(f"🎶 Mood: **{mood}**\nRecommendation: **{song_title} — {artist}**")
 
-            # IMPORTANT: Send the m!play command in its own message only
-            # (Best chance for Jockie to see it if it accepts bot messages.)
             play_cmd = f"m!play {song_title} - {artist}"
             await ctx.send(play_cmd, allowed_mentions=discord.AllowedMentions.none())
 
         except Exception as e:
-            # Keep error output under 2000 chars
             await safe_send(ctx, f"❌ Gemini step failed.\nError: {e}")
+
 
 # Poll command
 @bot.command()
