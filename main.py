@@ -5,10 +5,11 @@ from dotenv import load_dotenv
 import os
 import aiohttp
 import asyncio
-import datetime
+import datetime as dt
 import re
 import random
 import json
+import io
 
 # --- Gemini imports ---
 import google.generativeai as genai
@@ -86,6 +87,25 @@ banned_words = [
     "nygga", "nygger", "nigguh", "niggur", "niggir",
 ]
 
+# ---------------- SAFE SEND HELPERS -----------------
+DISCORD_LIMIT = 2000
+CHUNK_SIZE = 1900  # safety margin
+
+async def safe_send(channel, text):
+    """Send text safely without exceeding Discord limit."""
+    if len(text) <= DISCORD_LIMIT:
+        return await channel.send(text)
+    for i in range(0, len(text), CHUNK_SIZE):
+        await channel.send(text[i:i+CHUNK_SIZE])
+
+async def send_as_file(channel, content: str, filename: str, header: str = None):
+    """Attach long content as a file instead of breaking Discord limit."""
+    if header:
+        await channel.send(header)
+    data = io.BytesIO(content.encode("utf-8"))
+    await channel.send(file=discord.File(data, filename))
+
+# ---------------- UTILITIES -----------------
 async def get_quote():
     """Fetch quote from API, fallback to local list if failed."""
     url = "https://zenquotes.io/api/random"
@@ -97,7 +117,7 @@ async def get_quote():
                     return data[0]['q'] + " — " + data[0]['a']
     except:
         pass
-    return quotes[datetime.datetime.now().day % len(quotes)]
+    return quotes[dt.datetime.now().day % len(quotes)]
 
 def normalize_message(content: str) -> str:
     """Remove symbols, punctuation, emojis and make lowercase for strict filtering."""
@@ -110,7 +130,6 @@ def normalize_message(content: str) -> str:
 @bot.event
 async def on_ready():
     print(f"✅ {bot.user.name} is online and ready!")
-
     if not send_daily_quote.is_running():
         send_daily_quote.start()
 
@@ -140,7 +159,7 @@ async def on_message(message):
     if "thank you" in lower_msg:
         await message.channel.send("https://tenor.com/view/thank-you-thank-you-bro-how-i-thank-bro-fantasy-challenge-thank-you-tiktok-gif-7839145224229268701")
 
-    # PLZ SPEED auto-trigger (in order)
+    # PLZ SPEED auto-trigger
     if re.search(r"plz.*speed.*i need this", lower_msg):
         await message.channel.send("https://tenor.com/view/my-mom-is-kinda-homeless-ishowspeed-speeding-please-speed-i-need-this-ishowspeed-trying-not-to-laugh-gif-16620227105127147208")
 
@@ -155,46 +174,56 @@ class MoodResponse(BaseModel):
 
 @bot.command(name="moodplay")
 async def moodplay(ctx):
-    message = ctx.message
-    await message.channel.send("⚡ Moodplay command triggered!")
-    await message.channel.send("🔍 Collecting recent messages...")
+    await ctx.send("⚡ Moodplay command triggered!")
+    await ctx.send("🔍 Collecting recent messages...")
 
-    messages = []
+    lines = []
     async for msg in ctx.channel.history(limit=20):
-        messages.append(f"{msg.author}: {msg.content}")
-    messages.reverse()
-    await message.channel.send(f"📝 Collected {len(messages)} messages:\n{messages}")
+        if msg.author.bot:
+            continue
+        author = getattr(msg.author, "display_name", str(msg.author))
+        content = msg.content.replace("\n", " ")[:140]
+        lines.append(f"{author}: {content}")
+    lines.reverse()
+    preview = "\n".join(lines[-8:])
+
+    prompt = (
+        "Using the conversation below, return a JSON with keys 'mood' and "
+        "'song_recommendation'. Keep it short.\n\n"
+        f"{preview}"
+    )
 
     try:
-        await message.channel.send("🤖 Initializing Gemini model...")
+        await ctx.send("🤖 Talking to Gemini...")
         model = genai.GenerativeModel("gemini-2.0-flash")
-
-        # Run Gemini in background thread
         response = await asyncio.to_thread(
             model.generate_content,
-            f"Using these messages in the conversation, return the mood and a song recommendation in JSON. Messages: {messages}",
+            prompt,
             generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json",
-                response_schema=MoodResponse,  # ✅ use Pydantic model
+                response_schema=MoodResponse,
             ),
         )
 
-        await message.channel.send(f"📩 Raw Gemini response: {response.text}")
-
-        # Parse safely
+        raw = response.text or ""
         try:
-            data = json.loads(response.text)
-            mood = data.get("mood")
-            song = data.get("song_recommendation")
-            await message.channel.send(f"🎶 To match the mood of **{mood}**, I recommend: **{song}**")
-            await message.channel.send(f"m!play {song}")
-        except Exception as parse_err:
-            await message.channel.send("⚠️ Couldn’t parse Gemini’s JSON response.")
-            await message.channel.send(f"Error details: {parse_err}")
+            data = json.loads(raw)
+        except Exception:
+            m = re.search(r"\{.*\}", raw, re.S)
+            if not m:
+                await send_as_file(ctx, raw, "gemini_raw.txt",
+                                   "⚠️ Couldn’t parse JSON. Here’s the raw model output:")
+                return
+            data = json.loads(m.group(0))
+
+        mood = data.get("mood", "unknown").strip()
+        song = data.get("song_recommendation", "a song of your choice").strip()
+
+        await ctx.send(f"🎶 Mood: **{mood}**\nRecommendation: **{song}**")
+        await ctx.send(f"m!play {song}")
 
     except Exception as e:
-        await message.channel.send("❌ Gemini API call failed.")
-        await message.channel.send(f"Error details: {e}")
+        await safe_send(ctx, f"❌ Gemini step failed.\nError: {e}")
 
 # Poll command
 @bot.command()
@@ -222,20 +251,12 @@ async def poll(ctx, *args):
         await msg.add_reaction(reactions[i])
 
 # Daily motivational quote at 8 AM
-@tasks.loop(hours=24)
+@tasks.loop(time=dt.time(hour=8, minute=0, tzinfo=dt.timezone(dt.timedelta(hours=8))))
 async def send_daily_quote():
-    now = datetime.datetime.now()
-    target = now.replace(hour=8, minute=0, second=0, microsecond=0)
-    if now >= target:
-        target += datetime.timedelta(days=1)
-    await asyncio.sleep((target - now).total_seconds())
-
-    while True:
-        channel = discord.utils.get(bot.get_all_channels(), name="general")  # change to channel ID if needed
-        if channel:
-            quote = await get_quote()
-            await channel.send(f"🌞 Daily Motivation:\n> {quote}")
-        await asyncio.sleep(24 * 60 * 60)
+    channel = discord.utils.get(bot.get_all_channels(), name="general")
+    if channel:
+        quote = await get_quote()
+        await channel.send(f"🌞 Daily Motivation:\n> {quote}")
 
 # Manual help command
 @bot.command(name="ineedhelp")
