@@ -8,6 +8,9 @@ import asyncio
 import datetime
 import re
 import random
+import json  
+import google.generativeai as genai
+from google.generativeai.types import content_types
 
 # Added Flask keep-alive server for Render
 from flask import Flask
@@ -30,11 +33,13 @@ def keep_alive():
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
-
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.voice_states = True
+
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 bot.remove_command("help") 
@@ -247,6 +252,48 @@ async def compliment(ctx, member: discord.Member = None):
                 await ctx.send(f"💖 {member.mention}, {comp}")
             else:
                 await ctx.send(f"💖 {member.mention}, you're amazing (API failed but I got you).")
+
+@bot.command(name="moodplay")
+async def moodplay(ctx):
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    schema = content_types.Schema(
+        type="object",
+        properties={
+            "mood": {"type": "string"},
+            "song_recommendation": {"type": "string"},
+        },
+        required=["mood", "song_recommendation"]
+    )
+
+    if ctx.voice_client:
+        messages = []
+        async for msg in ctx.channel.history(limit=20):
+            messages.append(f"{msg.author}: {msg.content}")
+        messages.reverse()
+
+        response = model.generate_content(
+            f"Using these messages in the conversation, return the mood and a song recommendation in JSON. Messages: {messages}",
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json",
+                response_schema=schema,
+            ),
+        )
+
+        try:
+            data = json.loads(response.text)
+            mood = data.get("mood")
+            song = data.get("song_recommendation")
+
+            await ctx.send(f"🎶 To match the mood of **{mood}**, I recommend: **{song}**")
+            await ctx.send(f"m!play {song}")
+
+        except Exception as e:
+            await ctx.send("⚠️ Oops, couldn’t parse Gemini’s response.")
+            print("Parse error:", e, response.text)
+    else:
+        await ctx.send("I am not currently in a voice channel.")
+
+
 
 # Custom help command (renamed)
 @bot.command(name="helptryhard")
