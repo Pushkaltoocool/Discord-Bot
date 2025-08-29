@@ -135,6 +135,7 @@ async def on_message(message):
 
 @bot.command(name="moodplay")
 async def moodplay(ctx):
+    message = ctx.message  # grab the original message object
     print("⚡ Moodplay triggered!")
 
     model = genai.GenerativeModel("gemini-2.0-flash")
@@ -169,11 +170,11 @@ async def moodplay(ctx):
         mood = data.get("mood")
         song = data.get("song_recommendation")
 
-        await ctx.send(f"🎶 To match the mood of **{mood}**, I recommend: **{song}**")
-        await ctx.send(f"m!play {song}")
+        await message.channel.send(f"🎶 To match the mood of **{mood}**, I recommend: **{song}**")
+        await message.channel.send(f"m!play {song}")
 
     except Exception as e:
-        await ctx.send("⚠️ Oops, couldn’t parse Gemini’s response.")
+        await message.channel.send("⚠️ Oops, couldn’t parse Gemini’s response.")
         print("Parse error:", e, getattr(response, "text", "No response"))
 
 @bot.command()
