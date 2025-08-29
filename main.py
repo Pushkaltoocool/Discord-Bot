@@ -265,13 +265,13 @@ async def moodplay(ctx):
         required=["mood", "song_recommendation"]
     )
 
-    if ctx.voice_client:
-        messages = []
-        async for msg in ctx.channel.history(limit=20):
-            messages.append(f"{msg.author}: {msg.content}")
-        messages.reverse()
 
-        response = model.generate_content(
+    messages = []
+    async for msg in ctx.channel.history(limit=20):
+        messages.append(f"{msg.author}: {msg.content}")
+    messages.reverse()
+
+    response = model.generate_content(
             f"Using these messages in the conversation, return the mood and a song recommendation in JSON. Messages: {messages}",
             generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json",
@@ -279,19 +279,17 @@ async def moodplay(ctx):
             ),
         )
 
-        try:
-            data = json.loads(response.text)
-            mood = data.get("mood")
-            song = data.get("song_recommendation")
+    try:
+        data = json.loads(response.text)
+        mood = data.get("mood")
+        song = data.get("song_recommendation")
+        await ctx.send(f"🎶 To match the mood of **{mood}**, I recommend: **{song}**")
+        await ctx.send(f"m!play {song}")
 
-            await ctx.send(f"🎶 To match the mood of **{mood}**, I recommend: **{song}**")
-            await ctx.send(f"m!play {song}")
+    except Exception as e:
+        await ctx.send("⚠️ Oops, couldn’t parse Gemini’s response.")
+        print("Parse error:", e, response.text)
 
-        except Exception as e:
-            await ctx.send("⚠️ Oops, couldn’t parse Gemini’s response.")
-            print("Parse error:", e, response.text)
-    else:
-        await ctx.send("I am not currently in a voice channel.")
 
 
 
