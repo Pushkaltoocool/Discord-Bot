@@ -134,26 +134,28 @@ async def on_message(message):
 @bot.command(name="moodplay")
 async def moodplay(ctx):
     message = ctx.message
-    await message.channel.send("⚡ Moodplay triggered!")
-
-
-    messages = []
-    async for msg in ctx.channel.history(limit=20):
-        messages.append(f"{msg.author}: {msg.content}")
-    messages.reverse()
-    await message.channel.send(f"📝 Collected messages: {messages}")
+    await message.channel.send("⚡ Moodplay command triggered!")
 
     try:
+        await message.channel.send("🔍 Collecting recent messages...")
+        messages = []
+        async for msg in ctx.channel.history(limit=20):
+            messages.append(f"{msg.author}: {msg.content}")
+        messages.reverse()
+        await message.channel.send(f"📝 Collected {len(messages)} messages:\n{messages}")
+
+        await message.channel.send("🤖 Initializing Gemini model...")
         model = genai.GenerativeModel("gemini-2.0-flash")
         schema = content_types.Schema(
-        type="object",
-        properties={
-            "mood": {"type": "string"},
-            "song_recommendation": {"type": "string"},
-        },
-        required=["mood", "song_recommendation"]
+            type="object",
+            properties={
+                "mood": {"type": "string"},
+                "song_recommendation": {"type": "string"},
+            },
+            required=["mood", "song_recommendation"]
         )
 
+        await message.channel.send("📡 Sending messages to Gemini API...")
         response = await asyncio.to_thread(
             model.generate_content,
             f"Using these messages in the conversation, return the mood and a song recommendation in JSON. Messages: {messages}",
@@ -162,14 +164,16 @@ async def moodplay(ctx):
                 response_schema=schema,
             ),
         )
-        await message.channel.send(f"📩 Raw Gemini response: {response.text}")
 
+        await message.channel.send(f"📩 Raw Gemini response:\n```json\n{response.text}\n```")
+
+        await message.channel.send("🔎 Parsing Gemini response...")
         data = json.loads(response.text)
         mood = data.get("mood")
         song = data.get("song_recommendation")
 
-        await message.channel.send(f"🎶 To match the mood of **{mood}**, I recommend: **{song}**")
-        await message.channel.send(f"m!play {song}")
+        await message.channel.send(f"✅ Parsed successfully!\nMood: **{mood}**\nSong: **{song}**")
+        await message.channel.send(f"🎶 Playing now → m!play {song}")
 
     except Exception as e:
         await message.channel.send("⚠️ Oops, couldn’t parse Gemini’s response.")
