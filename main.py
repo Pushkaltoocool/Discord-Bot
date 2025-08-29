@@ -304,7 +304,7 @@ async def moodplay(ctx):
             if not song_title or not artist:
                 song_title, artist = "Don't Stop Me Now", "Queen"
 
-            await ctx.send(f"🎶 Mood: **{mood}**\nRecommendation: **{song_title} — {artist}**")
+            await ctx.send(f"🎶 Mood: **{mood}**\nRecommendation: **{song_title} {artist}**")
 
             play_cmd = f"m!play {song_title} - {artist}"
             await ctx.send(play_cmd, allowed_mentions=discord.AllowedMentions.none())
