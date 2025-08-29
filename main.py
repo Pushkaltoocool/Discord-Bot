@@ -136,15 +136,6 @@ async def moodplay(ctx):
     message = ctx.message
     await message.channel.send("⚡ Moodplay triggered!")
 
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    schema = content_types.Schema(
-        type="object",
-        properties={
-            "mood": {"type": "string"},
-            "song_recommendation": {"type": "string"},
-        },
-        required=["mood", "song_recommendation"]
-    )
 
     messages = []
     async for msg in ctx.channel.history(limit=20):
@@ -153,6 +144,16 @@ async def moodplay(ctx):
     await message.channel.send(f"📝 Collected messages: {messages}")
 
     try:
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        schema = content_types.Schema(
+        type="object",
+        properties={
+            "mood": {"type": "string"},
+            "song_recommendation": {"type": "string"},
+        },
+        required=["mood", "song_recommendation"]
+        )
+
         response = await asyncio.to_thread(
             model.generate_content,
             f"Using these messages in the conversation, return the mood and a song recommendation in JSON. Messages: {messages}",
