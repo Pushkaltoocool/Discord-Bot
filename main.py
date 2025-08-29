@@ -1,3 +1,4 @@
+# main.py
 import discord
 from discord.ext import commands, tasks
 import logging
@@ -10,10 +11,36 @@ import re
 import random
 import json
 import io
+import sys
+import atexit
+
+# --- Single-instance file lock (prevents double runs on Render) ---
+LOCK_PATH = "/tmp/tryhard_bot.lock"
+_lock_file = None
+def acquire_single_instance_lock():
+    """Ensure only one process connects the bot token."""
+    global _lock_file
+    _lock_file = open(LOCK_PATH, "w")
+    try:
+        import fcntl
+        fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except Exception:
+        print("Another instance appears to be running. Exiting to avoid duplicate messages.")
+        sys.exit(0)
+def release_single_instance_lock():
+    try:
+        import fcntl
+        fcntl.flock(_lock_file, fcntl.LOCK_UN)
+        _lock_file.close()
+        os.remove(LOCK_PATH)
+    except Exception:
+        pass
+acquire_single_instance_lock()
+atexit.register(release_single_instance_lock)
 
 # --- Gemini imports ---
 import google.generativeai as genai
-from pydantic import BaseModel  # ✅ correct way to define schema
+from pydantic import BaseModel
 
 # Added Flask keep-alive server for Render
 from flask import Flask
@@ -26,10 +53,11 @@ def home():
     return "✅ Tryhard Bot is alive!"
 
 def run_web():
-    app.run(host='0.0.0.0', port=8080)
+    # No debug/reloader to avoid duplicate processes
+    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
 
 def keep_alive():
-    t = threading.Thread(target=run_web)
+    t = threading.Thread(target=run_web, daemon=True)
     t.start()
 
 # -------------------------------------------------------------
@@ -38,16 +66,18 @@ load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
+# Logging
 handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-bot.remove_command("help") 
+bot.remove_command("help")
 
 # 👤 Kalvin
-TARGET_USER_ID = 620792701201154048  
+TARGET_USER_ID = 620792701201154048
 
 # fallback list of quotes
 quotes = [
@@ -66,15 +96,15 @@ sad_words = [
     "why bother", "life sucks", "fml", "ugh life", "why me", "done with life", "so tired of this",
     "lonely", "alone", "unloved", "nobody cares", "nobody loves me", "i’m worthless", "not cared about",
     "no friends", "ignored", "abandoned", "empty", "isolated",
-    "kill myself", "kms", "kys", "end it all", "suicidal", "suicide", "i wanna die", "want to die", 
-    "wish i was dead", "better off dead", "die alone", "ending it", "goodbye world", 
+    "kill myself", "kms", "kys", "end it all", "suicidal", "suicide", "i wanna die", "want to die",
+    "wish i was dead", "better off dead", "die alone", "ending it", "goodbye world",
     "slit wrists", "cutting", "self harm", "self-harm", "hurt myself", "not gonna make it",
-    "im gonna throw myself off a cliff", "throw myself off a cliff", 
+    "im gonna throw myself off a cliff", "throw myself off a cliff",
     "jump off a bridge", "jump off a building", "throw myself off", "end my life",
     "anxious", "anxiety", "stressed", "stressful", "overwhelmed", "drained", "burnt out", "burned out",
     "low energy", "tired", "exhausted", "done", "numb", "broken", "hurt", "pain", "painful", "suffering",
     "mentally exhausted", "emotionally drained", "can’t handle this", "can’t do this anymore",
-    "down", "feelsbad", "feels bad man", "bruh im sad", "ugh", "ugh life", "not okay", "im not okay", 
+    "down", "feelsbad", "feels bad man", "bruh im sad", "ugh", "ugh life", "not okay", "im not okay",
     "never happy", "so low", "feeling low", "stuck", "trapped", "lost", "dark thoughts", "heavy",
     "in my feels", "in my feelings", "broken heart", "💔", "🫠", "😔", "☹️", "😞", "😟", "😩", "😫", "🥺", "😿", "😕"
 ]
@@ -83,7 +113,7 @@ sad_words = [
 banned_words = [
     "nigga", "nigger", "niga", "niger", "nibba", "nibber",
     "niqqa", "niqqer", "n1gga", "n1gger", "n1gg4", "nigg4",
-    "neega", "neegr", "niggaz", "nigz", "nigs", "nig", 
+    "neega", "neegr", "niggaz", "nigz", "nigs", "nig",
     "nygga", "nygger", "nigguh", "niggur", "niggir",
 ]
 
@@ -91,12 +121,13 @@ banned_words = [
 DISCORD_LIMIT = 2000
 CHUNK_SIZE = 1900  # safety margin
 
-async def safe_send(channel, text):
+async def safe_send(channel, text, **kwargs):
     """Send text safely without exceeding Discord limit."""
     if len(text) <= DISCORD_LIMIT:
-        return await channel.send(text)
-    for i in range(0, len(text), CHUNK_SIZE):
-        await channel.send(text[i:i+CHUNK_SIZE])
+        return await channel.send(text, **kwargs)
+    # If long, ship as a file instead of spamming chunks
+    data = io.BytesIO(text.encode("utf-8"))
+    return await channel.send(file=discord.File(data, filename="message.txt"))
 
 async def send_as_file(channel, content: str, filename: str, header: str = None):
     """Attach long content as a file instead of breaking Discord limit."""
@@ -111,11 +142,11 @@ async def get_quote():
     url = "https://zenquotes.io/api/random"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data[0]['q'] + " — " + data[0]['a']
-    except:
+    except Exception:
         pass
     return quotes[dt.datetime.now().day % len(quotes)]
 
@@ -126,9 +157,14 @@ def normalize_message(content: str) -> str:
     return text
 
 # ---------------- BOT EVENTS -----------------
+_bot_ready_once = asyncio.Event()
 
 @bot.event
 async def on_ready():
+    # Guard: ensure this only logs/starts once even if Discord reconnects
+    if _bot_ready_once.is_set():
+        return
+    _bot_ready_once.set()
     print(f"✅ {bot.user.name} is online and ready!")
     if not send_daily_quote.is_running():
         send_daily_quote.start()
@@ -146,14 +182,17 @@ async def on_message(message):
         for word in banned_words:
             normalized_word = normalize_message(word)
             if normalized_word in normalized:
-                await message.delete()
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
                 await message.channel.send(f"{message.author.mention} just called himself gay!")
                 break
 
     # Sadness detector :(
     if any(word in lower_msg for word in sad_words):
         quote = await get_quote()
-        await message.channel.send(f"💙 Stay strong {message.author.mention}, here’s something for you:\n> {quote}")
+        await safe_send(message.channel, f"💙 Stay strong {message.author.mention}, here’s something for you:\n> {quote}")
 
     # THANK YOU auto-trigger
     if "thank you" in lower_msg:
@@ -167,63 +206,120 @@ async def on_message(message):
 
 # ---------------- BOT COMMANDS -----------------
 
-# ✅ Moodplay schema
+# ✅ Moodplay schema (strict: one song only)
 class MoodResponse(BaseModel):
     mood: str
-    song_recommendation: str
+    song_title: str
+    artist: str
+
+# lightweight concurrency guard to avoid overlapping !moodplay in same channel
+_moodplay_locks = {}
+
+def channel_lock(channel_id: int) -> asyncio.Lock:
+    lock = _moodplay_locks.get(channel_id)
+    if not lock:
+        lock = asyncio.Lock()
+        _moodplay_locks[channel_id] = lock
+    return lock
 
 @bot.command(name="moodplay")
 async def moodplay(ctx):
-    await ctx.send("⚡ Moodplay command triggered!")
-    await ctx.send("🔍 Collecting recent messages...")
+    async with channel_lock(ctx.channel.id):
+        await ctx.send("⚡ Moodplay command triggered!")
+        await ctx.send("🔍 Collecting recent messages...")
 
-    lines = []
-    async for msg in ctx.channel.history(limit=20):
-        if msg.author.bot:
-            continue
-        author = getattr(msg.author, "display_name", str(msg.author))
-        content = msg.content.replace("\n", " ")[:140]
-        lines.append(f"{author}: {content}")
-    lines.reverse()
-    preview = "\n".join(lines[-8:])
+        # Collect a compact preview for LLM context (not sent to channel)
+        lines = []
+        async for msg in ctx.channel.history(limit=30):
+            if msg.author.bot:
+                continue
+            author = getattr(msg.author, "display_name", str(msg.author))
+            content = msg.content.replace("\n", " ").strip()
+            if not content:
+                continue
+            # keep lines short to avoid oversizing the prompt
+            content = content[:160]
+            lines.append(f"{author}: {content}")
+        lines.reverse()
+        preview = "\n".join(lines[-10:])
 
-    prompt = (
-        "Using the conversation below, return a JSON with keys 'mood' and "
-        "'song_recommendation'. Keep it short.\n\n"
-        f"{preview}"
-    )
-
-    try:
-        await ctx.send("🤖 Talking to Gemini...")
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        response = await asyncio.to_thread(
-            model.generate_content,
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json",
-                response_schema=MoodResponse,
-            ),
+        # Prompt: force strict JSON with one specific song (title + artist only)
+        prompt = (
+            "You are a DJ. Read the chat fragment and output STRICT JSON matching this schema:\n"
+            "{ \"mood\": string, \"song_title\": string, \"artist\": string }\n"
+            "- Choose EXACTLY ONE specific, real song.\n"
+            "- 'song_title' must be the official song name only (no extra text).\n"
+            "- 'artist' must be the main performing artist only (no features unless essential).\n"
+            "- Do not add commentary. Only output JSON.\n\n"
+            f"Chat fragment:\n{preview}"
         )
 
-        raw = response.text or ""
         try:
-            data = json.loads(raw)
-        except Exception:
-            m = re.search(r"\{.*\}", raw, re.S)
-            if not m:
-                await send_as_file(ctx, raw, "gemini_raw.txt",
-                                   "⚠️ Couldn’t parse JSON. Here’s the raw model output:")
-                return
-            data = json.loads(m.group(0))
+            await ctx.send("🤖 Talking to Gemini...")
+            model = genai.GenerativeModel("gemini-2.0-flash")
 
-        mood = data.get("mood", "unknown").strip()
-        song = data.get("song_recommendation", "a song of your choice").strip()
+            # First try: structured output via Pydantic schema
+            try:
+                response = await asyncio.to_thread(
+                    model.generate_content,
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        response_mime_type="application/json",
+                        response_schema=MoodResponse,
+                    ),
+                )
+                raw = response.text or ""
+            except Exception:
+                # Fallback: ask for plain JSON (no schema)
+                response = await asyncio.to_thread(
+                    model.generate_content,
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        response_mime_type="application/json",
+                    ),
+                )
+                raw = (getattr(response, "text", None) or "").strip()
 
-        await ctx.send(f"🎶 Mood: **{mood}**\nRecommendation: **{song}**")
-        await ctx.send(f"m!play {song}")
+            # Parse JSON robustly
+            data = None
+            if raw:
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    m = re.search(r"\{.*\}", raw, re.S)
+                    if m:
+                        data = json.loads(m.group(0))
 
-    except Exception as e:
-        await safe_send(ctx, f"❌ Gemini step failed.\nError: {e}")
+            # Final safety fallback (static recs) if model fails
+            if not data or not isinstance(data, dict):
+                # very small mood-based fallback set
+                fallback = [
+                    {"mood": "uplifting", "song_title": "Don't Stop Me Now", "artist": "Queen"},
+                    {"mood": "chill", "song_title": "Lo-Fi Beats", "artist": "ChilledCow"},
+                    {"mood": "happy", "song_title": "Happy", "artist": "Pharrell Williams"},
+                    {"mood": "moody", "song_title": "Blinding Lights", "artist": "The Weeknd"},
+                ]
+                data = random.choice(fallback)
+
+            mood = str(data.get("mood", "unknown")).strip() or "unknown"
+            song_title = str(data.get("song_title", "")).strip()
+            artist = str(data.get("artist", "")).strip()
+
+            # sanitize; ensure we always have a single concrete song+artist
+            if not song_title or not artist:
+                song_title, artist = "Don't Stop Me Now", "Queen"
+
+            # Post a tidy summary
+            await ctx.send(f"🎶 Mood: **{mood}**\nRecommendation: **{song_title} — {artist}**")
+
+            # IMPORTANT: Send the m!play command in its own message only
+            # (Best chance for Jockie to see it if it accepts bot messages.)
+            play_cmd = f"m!play {song_title} - {artist}"
+            await ctx.send(play_cmd, allowed_mentions=discord.AllowedMentions.none())
+
+        except Exception as e:
+            # Keep error output under 2000 chars
+            await safe_send(ctx, f"❌ Gemini step failed.\nError: {e}")
 
 # Poll command
 @bot.command()
@@ -250,7 +346,7 @@ async def poll(ctx, *args):
     for i in range(len(options)):
         await msg.add_reaction(reactions[i])
 
-# Daily motivational quote at 8 AM
+# Daily motivational quote at 8 AM (UTC+8)
 @tasks.loop(time=dt.time(hour=8, minute=0, tzinfo=dt.timezone(dt.timedelta(hours=8))))
 async def send_daily_quote():
     channel = discord.utils.get(bot.get_all_channels(), name="general")
@@ -285,7 +381,7 @@ async def flip(ctx):
 async def roast(ctx, member: discord.Member = None):
     if not member:
         member = ctx.author
-    
+
     url = "https://evilinsult.com/generate_insult.php?lang=en&type=json"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
@@ -301,7 +397,7 @@ async def roast(ctx, member: discord.Member = None):
 async def compliment(ctx, member: discord.Member = None):
     if not member:
         member = ctx.author
-    
+
     url = "https://complimentr.com/api"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
@@ -336,4 +432,4 @@ async def help_command(ctx):
 
 # ---------------- RUN -----------------
 keep_alive()
-bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+bot.run(token, log_handler=handler, log_level=logging.INFO)
