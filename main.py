@@ -46,6 +46,9 @@ from pydantic import BaseModel
 from flask import Flask
 import threading
 
+# Translation
+from deep_translator import GoogleTranslator
+
 app = Flask('')
 
 @app.route('/')
@@ -53,8 +56,9 @@ def home():
     return "✅ Tryhard Bot is alive!"
 
 def run_web():
-    # No debug/reloader to avoid duplicate processes
-    app.run(host='0.0.0.0', port=8080, debug=False, use_reloader=False)
+    port = int(os.environ.get("PORT", 8080))  # Render assigns PORT
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
 
 def keep_alive():
     t = threading.Thread(target=run_web, daemon=True)
@@ -155,6 +159,90 @@ def normalize_message(content: str) -> str:
     text = content.lower()
     text = re.sub(r'[^a-z]', '', text)  # keep only a-z
     return text
+
+def parse_duration_to_seconds(s: str) -> int:
+    """
+    Parse compact duration strings like:
+      10m, 2h, 1d, 45s, or combos like 1h30m, 2d4h, 2h15m30s, etc.
+    Returns total seconds; raises ValueError if invalid.
+    """
+    s = s.strip().lower()
+    if not s:
+        raise ValueError("Empty duration.")
+    # allow space-separated combos as well: "1h 30m"
+    parts = re.findall(r'(\d+)\s*([smhd])', s)
+    if not parts:
+        raise ValueError("Invalid time format.")
+    total = 0
+    unit_map = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    for amt, unit in parts:
+        total += int(amt) * unit_map[unit]
+    if total <= 0:
+        raise ValueError("Duration must be > 0.")
+    return total
+
+# Language code resolver for translate
+LANG_ALIASES = {
+    # ISO codes
+    "en": "en", "eng": "en", "english": "en",
+    "es": "es", "spa": "es", "spanish": "es", "español": "es",
+    "fr": "fr", "fra": "fr", "fre": "fr", "french": "fr",
+    "de": "de", "ger": "de", "deu": "de", "german": "de",
+    "it": "it", "ita": "it", "italian": "it",
+    "pt": "pt", "por": "pt", "portuguese": "pt",
+    "pt-br": "pt", "br": "pt",
+    "ru": "ru", "rus": "ru", "russian": "ru",
+    "zh": "zh-cn", "zh-cn": "zh-cn", "chinese": "zh-cn", "mandarin": "zh-cn",
+    "zh-tw": "zh-tw", "traditional chinese": "zh-tw",
+    "ja": "ja", "jpn": "ja", "japanese": "ja",
+    "ko": "ko", "kor": "ko", "korean": "ko",
+    "ar": "ar", "ara": "ar", "arabic": "ar",
+    "hi": "hi", "hin": "hi", "hindi": "hi",
+    "id": "id", "ind": "id", "indonesian": "id", "bahasa": "id",
+    "ms": "ms", "msa": "ms", "malay": "ms",
+    "tl": "tl", "fil": "tl", "tagalog": "tl", "filipino": "tl",
+    "vi": "vi", "vie": "vi", "vietnamese": "vi",
+    "th": "th", "tha": "th", "thai": "th",
+    "tr": "tr", "tur": "tr", "turkish": "tr",
+    "nl": "nl", "dut": "nl", "nld": "nl", "dutch": "nl",
+    "sv": "sv", "swe": "sv", "swedish": "sv",
+    "no": "no", "nor": "no", "norsk": "no", "nb": "no", "nn": "no",
+    "da": "da", "dan": "da", "danish": "da",
+    "pl": "pl", "pol": "pl", "polish": "pl",
+    "uk": "uk", "ukr": "uk", "ukrainian": "uk",
+    "cs": "cs", "cze": "cs", "ces": "cs", "czech": "cs",
+    "el": "el", "greek": "el",
+    "he": "he", "iw": "he", "heb": "he", "hebrew": "he",
+    "fa": "fa", "per": "fa", "fas": "fa", "farsi": "fa", "persian": "fa",
+    "bg": "bg", "bul": "bg", "bulgarian": "bg",
+    "ro": "ro", "rum": "ro", "ron": "ro", "romanian": "ro",
+    "hu": "hu", "hun": "hu", "hungarian": "hu",
+    "fi": "fi", "fin": "fi", "finnish": "fi",
+    "et": "et", "est": "et", "estonian": "et",
+    "lt": "lt", "lit": "lt", "lithuanian": "lt",
+    "lv": "lv", "lav": "lv", "latvian": "lv",
+    "sr": "sr", "srp": "sr", "serbian": "sr",
+    "sk": "sk", "slk": "sk", "slovak": "sk",
+    "sl": "sl", "slv": "sl", "slovenian": "sl",
+    "hr": "hr", "hrv": "hr", "croatian": "hr",
+    "ga": "ga", "gle": "ga", "irish": "ga",
+    "is": "is", "ice": "is", "isl": "is", "icelandic": "is",
+    "af": "af", "afr": "af", "afrikaans": "af",
+    "sw": "sw", "swa": "sw", "swahili": "sw",
+    "am": "am", "amh": "am", "amharic": "am",
+    "ur": "ur", "urd": "ur", "urdu": "ur",
+    "bn": "bn", "ben": "bn", "bengali": "bn",
+    "ta": "ta", "tam": "ta", "tamil": "ta",
+    "te": "te", "tel": "te", "telugu": "te",
+    "mr": "mr", "mar": "mr", "marathi": "mr",
+    "gu": "gu", "guj": "gu", "gujarati": "gu",
+    "pa": "pa", "pan": "pa", "punjabi": "pa",
+    "swedish": "sv", "norwegian": "no",
+}
+
+def resolve_lang_code(s: str) -> str:
+    key = s.strip().lower()
+    return LANG_ALIASES.get(key, key)  # fall back to provided key
 
 # ---------------- BOT EVENTS -----------------
 _bot_ready_once = asyncio.Event()
@@ -312,6 +400,240 @@ async def moodplay(ctx):
         except Exception as e:
             await safe_send(ctx, f"❌ Gemini step failed.\nError: {e}")
 
+# ---------------- NEW FEATURES -----------------
+
+# -- Would You Rather (!wyr)
+WYR_QUESTIONS = [
+    "Would you rather be invisible or be able to fly?",
+    "Would you rather have unlimited sushi for life or unlimited tacos for life?",
+    "Would you rather always be 10 minutes late or always be 20 minutes early?",
+    "Would you rather fight 100 duck-sized horses or 1 horse-sized duck?",
+    "Would you rather know the history of every object you touch or be able to talk to animals?",
+    "Would you rather never use social media again or never watch another movie or TV show?",
+    "Would you rather teleport anywhere or be able to read minds?",
+    "Would you rather have the ability to see 10 minutes into the future or 150 years into the future?",
+    "Would you rather be forced to sing along to every song you hear or dance to every song you hear?",
+    "Would you rather have a personal maid or a personal chef?",
+    "Would you rather lose your sight or your memories?",
+    "Would you rather always have a full phone battery or a full gas tank?",
+    "Would you rather have super strength or super speed?",
+    "Would you rather be able to speak all languages or be able to speak to animals?",
+    "Would you rather be the funniest person in the room or the smartest?",
+    "Would you rather live in a world where it pours whenever you sneeze or thunder claps whenever you laugh?",
+    "Would you rather never be stuck in traffic again or never get another cold?",
+    "Would you rather live without music or live without video games?",
+    "Would you rather drink only water or only coffee for the rest of your life?",
+    "Would you rather be an unknown superhero or a famous villain?",
+    "Would you rather always step on a LEGO or always feel like you need to sneeze?",
+    "Would you rather give up pizza forever or give up burgers forever?",
+    "Would you rather have one real get-out-of-jail-free card or a key that opens any door?",
+    "Would you rather glow bright pink every time you’re embarrassed or have a loud honk whenever you’re stressed?",
+    "Would you rather be able to pause time or rewind time?",
+    "Would you rather have to listen to only one song forever or watch only one movie forever?",
+    "Would you rather be rich and lonely or poor and popular?",
+    "Would you rather read the book or watch the movie?",
+    "Would you rather live in space or live under the sea?",
+    "Would you rather be the best player on a losing team or the worst player on a winning team?",
+    "Would you rather only be able to whisper or only be able to shout?",
+    "Would you rather be able to change the past or see into the future?",
+    "Would you rather always have the perfect comeback or always get the last laugh?",
+    "Would you rather wear wet socks for a day or wear winter gloves all day in summer?",
+    "Would you rather never have to sleep or never have to eat?",
+    "Would you rather find true love today or win the lottery next year?",
+    "Would you rather have free international flights for life or never pay for food at restaurants?",
+    "Would you rather only talk in rhymes or only talk in riddles?",
+    "Would you rather have your dream job but no time for friends, or a simple job with tons of time for friends?",
+    "Would you rather always feel slightly too hot or slightly too cold?",
+    "Would you rather be trapped in a romantic comedy with your enemies or a horror movie with your friends?",
+    "Would you rather be able to only move by skipping or only move by crawling?",
+    "Would you rather never use emojis again or never watch memes again?",
+    "Would you rather own a dragon or be a dragon?",
+    "Would you rather travel the world for a year on a shoestring budget or stay in one country in luxury?",
+    "Would you rather have a rewind button on your life or a pause button?",
+    "Would you rather live with no internet or no AC/heating?",
+    "Would you rather always get stuck behind slow walkers or always be stuck in traffic?",
+    "Would you rather have a photographic memory or be able to forget anything you want?",
+    "Would you rather only eat spicy food or only eat bland food?",
+    "Would you rather never age physically or never age mentally?",
+    "Would you rather always say what you’re thinking or never speak again?",
+    "Would you rather give up your smartphone for a week or give up sugar for a week?",
+    "Would you rather be able to clone yourself once or time travel once?",
+    "Would you rather be famous for something embarrassing or unknown for something meaningful?",
+]
+
+@bot.command(name="wyr")
+async def wyr(ctx):
+    """Send a Would You Rather question and add vote reactions."""
+    q = random.choice(WYR_QUESTIONS)
+    # Try to split into two options for display if possible
+    opt_a, opt_b = None, None
+    # Common "or" splitter
+    if " or " in q.lower():
+        parts = re.split(r"\s+or\s+", q, flags=re.IGNORECASE)
+        if len(parts) == 2:
+            opt_a, opt_b = parts[0].strip(" ?"), parts[1].strip(" ?")
+    desc = ""
+    if opt_a and opt_b:
+        desc = f"1️⃣ {opt_a}\n2️⃣ {opt_b}"
+    embed = discord.Embed(title="🤔 Would You Rather...", description=desc or q, color=discord.Color.blurple())
+    msg = await ctx.send(embed=embed if desc else None, content=None if desc else f"🤔 {q}")
+    # Always add 1 and 2 for consistency
+    try:
+        await msg.add_reaction("1️⃣")
+        await msg.add_reaction("2️⃣")
+    except Exception:
+        pass
+
+# -- Reminder System (!remindme 10m <message>) w/ combo support like 1h30m
+async def _reminder_task(channel: discord.TextChannel, user: discord.User, seconds: int, reminder: str):
+    try:
+        await asyncio.sleep(seconds)
+        await channel.send(f"🔔 Reminder for {user.mention}: {reminder}")
+    except Exception:
+        # Channel may be gone or perms changed — swallow errors
+        pass
+
+@bot.command(name="remindme")
+async def remindme(ctx, time: str = None, *, message: str = None):
+    """
+    Usage: !remindme <duration> <message>
+    Examples:
+      !remindme 10m stretch
+      !remindme 1h30m take a break
+      !remindme 2d submit assignment
+    """
+    if not time or not message:
+        return await ctx.send("Usage: `!remindme <10s|10m|2h|1d|1h30m> <message>`")
+    try:
+        seconds = parse_duration_to_seconds(time)
+    except ValueError:
+        return await ctx.send("⏱️ Invalid duration. Examples: `10m`, `1h30m`, `2d4h`, `45s`")
+    # Schedule task without blocking the command
+    asyncio.create_task(_reminder_task(ctx.channel, ctx.author, seconds, message))
+    await ctx.send(f"⏰ Okay {ctx.author.mention}, I’ll remind you in **{time}**: {message}")
+
+# -- Translate Command (!translate <lang> <text>) using deep_translator (GoogleTranslator)
+@bot.command(name="translate")
+async def translate_cmd(ctx, lang: str = None, *, text: str = None):
+    """
+    Translate text into a target language.
+    Usage: !translate <lang> <text>
+    Examples:
+      !translate es Hello, how are you?
+      !translate japanese I love ramen
+    """
+    if not lang or not text:
+        return await ctx.send("Usage: `!translate <lang> <text>` e.g., `!translate es good morning`")
+    target = resolve_lang_code(lang)
+    try:
+        translated_text = await asyncio.to_thread(
+            GoogleTranslator(source="auto", target=target).translate, text
+        )
+        await ctx.send(f"🌍 **{translated_text}** *(auto → {target})*")
+    except Exception as e:
+        await ctx.send(f"❌ Translation failed: {e}")
+
+# -- Mood Tracker (!mymood) analyze last 20 messages by that user (cross-channels best-effort)
+POS_WORDS = {
+    "happy", "glad", "great", "awesome", "good", "love", "excited", "yay", "win", "nice",
+    "fun", "cool", "chill", "relaxed", "relax", "lol", "lmao", "haha", "hehe", "content"
+}
+NEG_WORDS = {
+    "sad", "tired", "angry", "mad", "upset", "anxious", "stress", "stressed", "depressed",
+    "cry", "crying", "lonely", "worthless", "pain", "hurt", "numb", "lost", "down", "ugh", "hate"
+}
+
+async def collect_user_messages(guild: discord.Guild, user: discord.User, needed: int = 20, per_channel_limit: int = 200, global_scan_limit: int = 3000):
+    """Collect up to `needed` most-recent messages by user across text channels (best-effort)."""
+    msgs = []
+    scanned = 0
+    if not guild:
+        return msgs
+    for channel in guild.text_channels:
+        if len(msgs) >= needed:
+            break
+        # skip channels bot can't read
+        if not channel.permissions_for(guild.me).read_message_history:
+            continue
+        try:
+            async for msg in channel.history(limit=per_channel_limit):
+                scanned += 1
+                if scanned > global_scan_limit or len(msgs) >= needed:
+                    break
+                if msg.author.id == user.id and msg.content:
+                    # keep a compact single-line version
+                    clean = msg.content.replace("\n", " ").strip()
+                    if clean:
+                        msgs.append(clean[:200])
+                        if len(msgs) >= needed:
+                            break
+        except Exception:
+            # perms or rate limits — ignore channel
+            continue
+    return msgs[:needed]
+
+def heuristic_mood_guess(texts: list[str]) -> str:
+    """Fallback mood guess without AI if Gemini fails."""
+    text = " ".join(texts).lower()
+    pos = sum(1 for w in POS_WORDS if w in text)
+    neg = sum(1 for w in NEG_WORDS if w in text)
+    if pos > neg and pos > 0:
+        return "happy"
+    if neg > pos and neg > 0:
+        # pick a common negative vibe based on keywords
+        if any(k in text for k in ["stress", "stressed", "pressure", "deadline"]):
+            return "stressed"
+        if any(k in text for k in ["angry", "mad"]):
+            return "angry"
+        if any(k in text for k in ["sad", "cry", "lonely", "depress"]):
+            return "sad"
+        return "down"
+    return "neutral"
+
+@bot.command(name="mymood")
+async def mymood(ctx):
+    """Analyze last 20 messages sent by the invoking user and report mood."""
+    await ctx.send("🧠 Analyzing your recent messages...")
+    # Prefer cross-channel (guild) collection, fallback to current channel only
+    texts = []
+    if ctx.guild:
+        texts = await collect_user_messages(ctx.guild, ctx.author, needed=20, per_channel_limit=100, global_scan_limit=2000)
+    if not texts:
+        # fallback: current channel only
+        async for msg in ctx.channel.history(limit=300):
+            if msg.author.id == ctx.author.id and msg.content:
+                texts.append(msg.content.replace("\n", " ")[:200])
+                if len(texts) >= 20:
+                    break
+    if not texts:
+        return await ctx.send("😕 I couldn’t find enough of your messages to analyze.")
+    fragment = "\n".join(texts)
+
+    prompt = (
+        "You will receive up to 20 recent messages from ONE user. "
+        "Infer their CURRENT OVERALL MOOD as a single lowercase word from this set:\n"
+        "[happy, sad, stressed, chill, angry, excited, bored, anxious, neutral].\n"
+        "Rules:\n"
+        "- Respond with ONLY one word, no punctuation or explanations.\n"
+        "- If uncertain, respond with 'neutral'.\n\n"
+        f"MESSAGES:\n{fragment}\n\n"
+        "MOOD:"
+    )
+    mood = None
+    try:
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        mood_raw = (getattr(response, "text", None) or "").strip().lower()
+        # sanitize to a single token
+        mood = re.sub(r"[^a-z]", "", mood_raw)
+        if not mood:
+            raise ValueError("Empty AI response.")
+    except Exception:
+        mood = heuristic_mood_guess(texts)
+
+    await ctx.send(f"🧭 Based on your last 20 messages, your mood seems to be: **{mood}**")
+
+# ---------------- Existing commands (plus minor improvements) -----------------
 
 # Poll command
 @bot.command()
@@ -336,21 +658,54 @@ async def poll(ctx, *args):
     msg = await ctx.send(embed=embed)
 
     for i in range(len(options)):
-        await msg.add_reaction(reactions[i])
+        try:
+            await msg.add_reaction(reactions[i])
+        except Exception:
+            pass
 
 # Daily motivational quote at 8 AM (UTC+8)
 @tasks.loop(time=dt.time(hour=8, minute=0, tzinfo=dt.timezone(dt.timedelta(hours=8))))
 async def send_daily_quote():
+    # Prefer #general; fallback to the first available text channel
     channel = discord.utils.get(bot.get_all_channels(), name="general")
+    if not channel:
+        for ch in bot.get_all_channels():
+            if isinstance(ch, discord.TextChannel):
+                channel = ch
+                break
     if channel:
         quote = await get_quote()
-        await channel.send(f"🌞 Daily Motivation:\n> {quote}")
+        try:
+            await channel.send(f"🌞 Daily Motivation:\n> {quote}")
+        except Exception:
+            pass
 
-# Manual help command
-@bot.command(name="ineedhelp")
-async def ineedhelp(ctx):
-    quote = await get_quote()
-    await ctx.send(f"💡 Here’s something to lift you up, {ctx.author.mention}:\n> {quote}")
+# Manual help command (renamed)
+@bot.command(name="helptryhard")
+async def help_command(ctx):
+    embed = discord.Embed(
+        title="📖 Tryhard Bot Help",
+        description="Here are all the commands and features I support:",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="!wyr", value="Would You Rather — vote with 1️⃣ / 2️⃣.", inline=False)
+    embed.add_field(name="!remindme <time> <message>", value="Set a reminder. e.g. `!remindme 1h30m take a break`", inline=False)
+    embed.add_field(name="!translate <lang> <text>", value="Translate text to a target language. e.g. `!translate es good morning`", inline=False)
+    embed.add_field(name="!mymood", value="Analyze your last 20 messages and guess your mood.", inline=False)
+    embed.add_field(name="!moodplay", value="AI DJ recommends EXACTLY one song based on chat vibe.", inline=False)
+    embed.add_field(name="!poll <question> <option1> <option2> [...]", value="Create a poll (2–10 options).", inline=False)
+    embed.add_field(name="!ineedhelp", value="Get a motivational quote instantly.", inline=False)
+    embed.add_field(name="!thankyou", value="Send a thank you gif.", inline=False)
+    embed.add_field(name="!plzspeedineedthis", value="Send a Speed gif.", inline=False)
+    embed.add_field(name="!flip", value="Flip a coin (Heads or Tails).", inline=False)
+    embed.add_field(name="!roast @user", value="Send a random roast from Evil Insult API.", inline=False)
+    embed.add_field(name="!compliment @user", value="Send a wholesome compliment (now with fallback).", inline=False)
+    embed.add_field(name="🌞 Daily Quotes", value="I send a motivational quote every day at 8 AM in #general.", inline=False)
+    embed.add_field(name="😢 Depression Checker", value="If you say sad/depressed/self-harm things, I’ll send you a motivational quote.", inline=False)
+    embed.add_field(name="🛑 Special Filter", value="If user `620792701201154048` uses *any* version of the N-word, their message is deleted and replaced with a funny reply.", inline=False)
+    embed.add_field(name="😂 Auto-Triggers", value="Saying 'thank you' or 'plz speed i need this' will trigger funny gifs.", inline=False)
+
+    await ctx.send(embed=embed)
 
 # Thank You command
 @bot.command(name="thankyou")
@@ -376,51 +731,66 @@ async def roast(ctx, member: discord.Member = None):
 
     url = "https://evilinsult.com/generate_insult.php?lang=en&type=json"
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                insult = data.get("insult", "You're lucky, I couldn't think of an insult.")
-                await ctx.send(f"🔥 {member.mention}, {insult}")
-            else:
-                await ctx.send(f"🔥 {member.mention}, you're lucky, the roast machine broke.")
+        try:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    insult = data.get("insult", "You're lucky, I couldn't think of an insult.")
+                    await ctx.send(f"🔥 {member.mention}, {insult}")
+                else:
+                    await ctx.send(f"🔥 {member.mention}, you're lucky, the roast machine broke.")
+        except Exception:
+            await ctx.send(f"🔥 {member.mention}, the roast API choked. You win this round.")
 
-# Compliment command (API)
+# Compliment command (FIXED with robust fallback)
 @bot.command(name="compliment")
 async def compliment(ctx, member: discord.Member = None):
     if not member:
         member = ctx.author
 
-    url = "https://complimentr.com/api"
+    # Primary API
+    url_primary = "https://complimentr.com/api"
+    # Secondary API (fun fact / fortune fallback, we’ll rephrase it)
+    url_secondary = "https://api.adviceslip.com/advice"
+
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                comp = data.get("compliment", "You're amazing!")
-                await ctx.send(f"💖 {member.mention}, {comp}")
-            else:
-                await ctx.send(f"💖 {member.mention}, you're amazing (API failed but I got you).")
+        try:
+            async with session.get(url_primary, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    comp = data.get("compliment", "").strip()
+                    if comp:
+                        return await ctx.send(f"💖 {member.mention}, {comp}")
+        except Exception:
+            pass
 
-# Custom help command (renamed)
-@bot.command(name="helptryhard")
-async def help_command(ctx):
-    embed = discord.Embed(
-        title="📖 Tryhard Bot Help",
-        description="Here are all the commands and features I support:",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="!poll <question> <option1> <option2> ...", value="Create a poll (2–10 options).", inline=False)
-    embed.add_field(name="!ineedhelp", value="Get a motivational quote instantly.", inline=False)
-    embed.add_field(name="!thankyou", value="Send a thank you gif.", inline=False)
-    embed.add_field(name="!plzspeedineedthis", value="Send a Speed gif.", inline=False)
-    embed.add_field(name="!flip", value="Flip a coin (Heads or Tails).", inline=False)
-    embed.add_field(name="!roast @user", value="Send a random roast from Evil Insult API.", inline=False)
-    embed.add_field(name="!compliment @user", value="Send a wholesome compliment from Complimentr API.", inline=False)
-    embed.add_field(name="🌞 Daily Quotes", value="I send a motivational quote every day at 8 AM in #general.", inline=False)
-    embed.add_field(name="😢 Depression Checker", value="If you say sad/depressed/self-harm things, I’ll send you a motivational quote.", inline=False)
-    embed.add_field(name="🛑 Special Filter", value="If user `620792701201154048` uses *any* version of the N-word, their message is deleted and replaced with a funny reply.", inline=False)
-    embed.add_field(name="😂 Auto-Triggers", value="Saying 'thank you' or 'plz speed i need this' will trigger funny gifs.", inline=False)
+        # Secondary attempt
+        try:
+            async with session.get(url_secondary, timeout=aiohttp.ClientTimeout(total=8)) as resp2:
+                if resp2.status == 200:
+                    data2 = await resp2.json()
+                    advice = (data2.get("slip") or {}).get("advice", "").strip()
+                    if advice:
+                        return await ctx.send(f"💖 {member.mention}, you're awesome — also, a lil' thought: {advice}")
+        except Exception:
+            pass
 
-    await ctx.send(embed=embed)
+    # Final local fallback
+    fallback = [
+        "You have a magnetic energy that brightens rooms.",
+        "Your presence makes things better.",
+        "You’re the kind of person people feel lucky to know.",
+        "You make hard things feel possible.",
+        "Your humor is elite. Never change.",
+        "You’re doing better than you think.",
+    ]
+    await ctx.send(f"💖 {member.mention}, {random.choice(fallback)}")
+
+# Manual help for immediate support
+@bot.command(name="ineedhelp")
+async def ineedhelp(ctx):
+    quote = await get_quote()
+    await ctx.send(f"💡 Here’s something to lift you up, {ctx.author.mention}:\n> {quote}")
 
 # ---------------- RUN -----------------
 keep_alive()
