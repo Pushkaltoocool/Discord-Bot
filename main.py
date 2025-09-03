@@ -717,6 +717,58 @@ async def thankyou(ctx):
 async def plzspeedineedthis(ctx):
     await ctx.send("https://tenor.com/view/my-mom-is-kinda-homeless-ishowspeed-speeding-please-speed-i-need-this-ishowspeed-trying-not-to-laugh-gif-16620227105127147208")
 
+# 67 command (triggers on any orientation of 6 7 or six seven)
+@bot.command(name="67")
+async def sixtyseven(ctx):
+    await ctx.send("https://tenor.com/view/taylen-kinney-6-7-67-six-seven-doot-doot-gif-14312959711459626479")
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user or message.author.bot:
+        return
+
+    lower_msg = message.content.lower()
+
+    # 67 meme trigger (any orientation: 6 7, 7 6, six seven, seven six, etc.)
+    patterns = [
+        r"\b6\s*7\b", r"\b7\s*6\b",
+        r"\bsix\s*seven\b", r"\bseven\s*six\b",
+        r"\b6\s*seven\b", r"\bsix\s*7\b",
+        r"\bseven\s*6\b", r"\b7\s*six\b"
+    ]
+    if any(re.search(p, lower_msg) for p in patterns):
+        await message.channel.send("https://tenor.com/view/taylen-kinney-6-7-67-six-seven-doot-doot-gif-14312959711459626479")
+        return
+
+    # just for kalvin HAHAHAHHAAH
+    if message.author.id == TARGET_USER_ID:
+        normalized = normalize_message(message.content)
+        for word in banned_words:
+            normalized_word = normalize_message(word)
+            if normalized_word in normalized:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                await message.channel.send(f"{message.author.mention} just called himself gay!")
+                break
+
+    # Sadness detector :(
+    if any(word in lower_msg for word in sad_words):
+        quote = await get_quote()
+        await safe_send(message.channel, f"💙 Stay strong {message.author.mention}, here’s something for you:\n> {quote}")
+
+    # THANK YOU auto-trigger
+    if "thank you" in lower_msg:
+        await message.channel.send("https://tenor.com/view/thank-you-thank-you-bro-how-i-thank-bro-fantasy-challenge-thank-you-tiktok-gif-7839145224229268701")
+
+    # PLZ SPEED auto-trigger
+    if re.search(r"plz.*speed.*i need this", lower_msg):
+        await message.channel.send("https://tenor.com/view/my-mom-is-kinda-homeless-ishowspeed-speeding-please-speed-i-need-this-ishowspeed-trying-not-to-laugh-gif-16620227105127147208")
+
+    await bot.process_commands(message)
+
+
 # Coin flip command
 @bot.command(name="flip")
 async def flip(ctx):
